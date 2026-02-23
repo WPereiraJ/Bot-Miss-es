@@ -21,7 +21,7 @@ const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID;
 
 // === COLOQUE O ID DO SEU CARGO FIXO AQUI ===
-const CARGO_JOGADORES_ID = '1475291993084137532';
+const CARGO_JOGADORES_ID = '1475300658923045128';
 
 const client = new Client({ 
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages],
@@ -417,4 +417,5 @@ const express = require('express');
 const app = express();
 app.get('/', (req, res) => res.send('O Bot do Mural de RPG está online e operante!'));
 const port = process.env.PORT || 3000;
+
 app.listen(port, () => console.log(`Servidor web de mentirinha rodando na porta ${port}`));
