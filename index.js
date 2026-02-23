@@ -156,7 +156,6 @@ const commands = [
         .addIntegerOption(opt => opt.setName('nd').setDescription('Nível de Desafio Base').setRequired(true).addChoices(...ndChoices))
         .addStringOption(opt => opt.setName('dificuldade').setDescription('Dificuldade').setRequired(true).addChoices({ name: 'Normal', value: 'normal' }, { name: 'Difícil', value: 'dificil' }, { name: 'Tormenta', value: 'tormenta' }))
         .addIntegerOption(opt => opt.setName('vagas').setDescription('Quantidade de Vagas').setRequired(true).addChoices(...vagasChoices)),
-    new SlashCommandBuilder().setName('painelcargo').setDescription('Cria o botão para os jogadores pegarem o cargo.')
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);
@@ -169,12 +168,6 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
 
     if (interaction.isChatInputCommand()) {
-        if (interaction.commandName === 'painelcargo') {
-            const emb = new EmbedBuilder().setColor('#2ECC71').setTitle('📜 Cargo de Aventureiro').setDescription('Clique abaixo para pegar o cargo e receber notificações do mural.');
-            const r = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('pegar_cargo').setLabel('Pegar Cargo').setStyle(ButtonStyle.Success));
-            return interaction.reply({ embeds: [emb], components: [r] });
-        }
-
         if (interaction.commandName === 'recompensa') {
             const nd = interaction.options.getInteger('nd');
             const dif = interaction.options.getString('dificuldade');
@@ -289,13 +282,6 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.isButton()) {
-        if (interaction.customId === 'pegar_cargo') {
-            try { 
-                await interaction.member.roles.add(CARGO_JOGADORES_ID); 
-                await interaction.reply({ content: '✅ Você pegou o cargo de aventureiro!', ephemeral: true }); 
-            } catch (e) { await interaction.reply({ content: '❌ Erro de permissão.', ephemeral: true }); }
-        }
-
         if (interaction.customId.startsWith('edit_')) {
             const missionId = interaction.customId.split('_')[1];
             const m = await Mission.findOne({ missionId });
@@ -421,5 +407,6 @@ const express = require('express');
 const app = express();
 app.get('/', (req, res) => res.send('O Bot do Mural de RPG está online e salvo no MongoDB!'));
 app.listen(process.env.PORT || 3000);
+
 
 client.login(token);
