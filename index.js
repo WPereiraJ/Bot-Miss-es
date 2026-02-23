@@ -139,7 +139,7 @@ const commands = [
         .setDescription('Abre o formulário para criar uma missão no mural.')
         .addIntegerOption(opt => opt.setName('nd').setDescription('Nível de Desafio Base').setRequired(true).addChoices(...ndChoices))
         .addStringOption(opt => opt.setName('dificuldade').setDescription('Dificuldade').setRequired(true)
-            .addChoices({ name: 'Normal', value: 'normal' }, { name: 'Difícil', value: 'dificil' }, { name: 'Tormenta 20%', value: 'tormenta' }))
+            .addChoices({ name: 'Normal', value: 'normal' }, { name: 'Difícil', value: 'dificil' }, { name: 'Tormenta', value: 'tormenta' }))
         .addStringOption(opt => opt.setName('data_hora').setDescription('Data e horário da sessão').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -415,3 +415,4 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Servidor web de mentirinha rodando na porta ${port}`));
 
 client.login(token);
+
