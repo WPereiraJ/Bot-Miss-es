@@ -54,7 +54,7 @@ function buildMissionMessage(missionId, m) {
         listaVagas.push(m.jogadoresAceitos[i] ? `• <@${m.jogadoresAceitos[i]}>` : `• Vazio`);
     }
     
-    const mencao = CARGO_JOGADORES_ID !== 'COLE_O_ID_AQUI' && !m.concluida ? `<@&${CARGO_JOGADORES_ID}>\n\n` : '';
+    const mencao = CARGO_JOGADORES_ID !== '1475300658923045128' && !m.concluida ? `<@&${CARGO_JOGADORES_ID}>\n\n` : '';
     const statusTag = m.concluida ? `✅ **[MISSÃO CONCLUÍDA]**\n\n` : '';
     
     // Lógica para mostrar "ND 15 - 16 - 17"
@@ -415,4 +415,5 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Servidor web de mentirinha rodando na porta ${port}`));
 
 client.login(token);
+
 
