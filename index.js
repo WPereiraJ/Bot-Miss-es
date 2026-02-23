@@ -21,7 +21,7 @@ const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID;
 
 // === COLOQUE O ID DO SEU CARGO FIXO AQUI ===
-const CARGO_JOGADORES_ID = '1475291993084137532';
+const CARGO_JOGADORES_ID = '1475300658923045128';
 
 const client = new Client({ 
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages],
@@ -57,11 +57,16 @@ function buildMissionMessage(missionId, m) {
     const mencao = CARGO_JOGADORES_ID !== 'COLE_O_ID_AQUI' && !m.concluida ? `<@&${CARGO_JOGADORES_ID}>\n\n` : '';
     const statusTag = m.concluida ? `✅ **[MISSÃO CONCLUÍDA]**\n\n` : '';
     
-    // Calcula a margem de ND permitida (+1 e -1, limitando entre 1 e 20)
+    // Lógica para mostrar "ND 15 - 16 - 17"
     const ndMin = Math.max(1, m.nd - 1);
     const ndMax = Math.min(20, m.nd + 1);
+    const faixaNd = [];
+    for (let i = ndMin; i <= ndMax; i++) {
+        faixaNd.push(i);
+    }
+    const textoNd = `ND ${faixaNd.join(' - ')}`;
     
-    const content = `${statusTag}- **Missão:** ${m.nome}\n- **Data e Hora:** ${m.dataHora}\n- **Mestre:** <@${m.gmId}>\n- **Nível de Desafio:** ND ${ndMin} - ND ${ndMax}\n- **Dificuldade:** ${modificadores[m.dif].nome}\n\n${mencao}**Vagas:** ${m.jogadoresAceitos.length}/${m.vagasTotais}\n${listaVagas.join('\n')}`;
+    const content = `${statusTag}- **Missão:** ${m.nome}\n- **Data e Hora:** ${m.dataHora}\n- **Mestre:** <@${m.gmId}>\n- **Nível de Desafio:** ${textoNd}\n- **Dificuldade:** ${modificadores[m.dif].nome}\n\n${mencao}**Vagas:** ${m.jogadoresAceitos.length}/${m.vagasTotais}\n${listaVagas.join('\n')}`;
     
     const embed = new EmbedBuilder().setColor(m.concluida ? '#2ECC71' : '#1C1C28').addFields(
         { name: 'Estilo de Jogo e Enredo', value: m.enredo, inline: false },
@@ -69,7 +74,6 @@ function buildMissionMessage(missionId, m) {
     );
 
     if (m.concluida) {
-        // O cálculo ainda usa a base exata (m.nd) para a recompensa correta
         const xpBase = tabelaRecompensas[m.nd].xp;
         const dinBase = tabelaRecompensas[m.nd].dinheiro;
         const mult = modificadores[m.dif].mult;
@@ -135,7 +139,7 @@ const commands = [
         .setDescription('Abre o formulário para criar uma missão no mural.')
         .addIntegerOption(opt => opt.setName('nd').setDescription('Nível de Desafio Base').setRequired(true).addChoices(...ndChoices))
         .addStringOption(opt => opt.setName('dificuldade').setDescription('Dificuldade').setRequired(true)
-            .addChoices({ name: 'Normal', value: 'normal' }, { name: 'Difícil', value: 'dificil' }, { name: 'Tormenta', value: 'tormenta' }))
+            .addChoices({ name: 'Normal', value: 'normal' }, { name: 'Difícil', value: 'dificil' }, { name: 'Tormenta 20%', value: 'tormenta' }))
         .addStringOption(opt => opt.setName('data_hora').setDescription('Data e horário da sessão').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -411,4 +415,3 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Servidor web de mentirinha rodando na porta ${port}`));
 
 client.login(token);
-
