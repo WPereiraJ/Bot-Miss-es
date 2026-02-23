@@ -21,24 +21,25 @@ const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID;
 
 // === COLOQUE O ID DO SEU CARGO FIXO AQUI ===
-const CARGO_JOGADORES_ID = '1475300658923045128';
+const CARGO_JOGADORES_ID = '1475291993084137532';
 
 const client = new Client({ 
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages],
     partials: [Partials.Channel] 
 });
 
-// Banco de Memória
+// Bancos de Memória
 const sessionCache = new Map();
 const activeMissions = new Map();
+const gmActiveMissions = new Set(); // Controle para o mestre não ter mais de 1 missão ativa
 
 // --- SISTEMA DE RECOMPENSAS ---
 const tabelaRecompensas = {
-    1: { xp: 500, dinheiro: 50 }, 2: { xp: 950, dinheiro: 75 }, 3: { xp: 1400, dinheiro: 100 }, 4: { xp: 1700, dinheiro: 250 },
-    5: { xp: 2150, dinheiro: 375 }, 6: { xp: 2400, dinheiro: 500 }, 7: { xp: 2650, dinheiro: 625 }, 8: { xp: 2850, dinheiro: 750 },
-    9: { xp: 3200, dinheiro: 1000 }, 10: { xp: 3350, dinheiro: 1500 }, 11: { xp: 3650, dinheiro: 2000 }, 12: { xp: 3800, dinheiro: 2500 },
-    13: { xp: 4100, dinheiro: 3250 }, 14: { xp: 4200, dinheiro: 4250 }, 15: { xp: 4300, dinheiro: 5500 }, 16: { xp: 4350, dinheiro: 7750 },
-    17: { xp: 4650, dinheiro: 10000 }, 18: { xp: 4700, dinheiro: 12500 }, 19: { xp: 4950, dinheiro: 15000 }, 20: { xp: 5000, dinheiro: 18000 }
+    1: { xp: 500, dinheiro: 65 }, 2: { xp: 950, dinheiro: 97 }, 3: { xp: 1400, dinheiro: 130 }, 4: { xp: 1700, dinheiro: 325 },
+    5: { xp: 2150, dinheiro: 487 }, 6: { xp: 2400, dinheiro: 650 }, 7: { xp: 2650, dinheiro: 812 }, 8: { xp: 2850, dinheiro: 975 },
+    9: { xp: 3200, dinheiro: 1300 }, 10: { xp: 3350, dinheiro: 1950 }, 11: { xp: 3650, dinheiro: 2600 }, 12: { xp: 3800, dinheiro: 3250 },
+    13: { xp: 4100, dinheiro: 4225 }, 14: { xp: 4200, dinheiro: 5525 }, 15: { xp: 4300, dinheiro: 7150 }, 16: { xp: 4350, dinheiro: 10075 },
+    17: { xp: 4650, dinheiro: 13000 }, 18: { xp: 4700, dinheiro: 16250 }, 19: { xp: 4950, dinheiro: 19500 }, 20: { xp: 6000, dinheiro: 23400 }
 };
 
 const modificadores = {
@@ -54,8 +55,18 @@ function buildMissionMessage(missionId, m) {
         listaVagas.push(m.jogadoresAceitos[i] ? `• <@${m.jogadoresAceitos[i]}>` : `• Vazio`);
     }
     
-    const mencao = CARGO_JOGADORES_ID !== '1475300658923045128' && !m.concluida ? `<@&${CARGO_JOGADORES_ID}>\n\n` : '';
-    const statusTag = m.concluida ? `✅ **[MISSÃO CONCLUÍDA]**\n\n` : '';
+    // Pinga o cargo apenas se a missão estiver ativa (não concluída nem falha)
+    const mencao = (CARGO_JOGADORES_ID && !m.concluida && !m.falha) ? `<@&${CARGO_JOGADORES_ID}>\n\n` : '';
+    
+    let statusTag = '';
+    let corEmbed = '#1C1C28';
+    if (m.concluida) {
+        statusTag = `✅ **[MISSÃO CONCLUÍDA]**\n\n`;
+        corEmbed = '#2ECC71';
+    } else if (m.falha) {
+        statusTag = `❌ **[MISSÃO FALHOU]**\n\n`;
+        corEmbed = '#E74C3C';
+    }
     
     // Lógica para mostrar "ND 15 - 16 - 17"
     const ndMin = Math.max(1, m.nd - 1);
@@ -66,36 +77,42 @@ function buildMissionMessage(missionId, m) {
     }
     const textoNd = `ND ${faixaNd.join(' - ')}`;
     
-    const content = `${statusTag}- **Missão:** ${m.nome}\n- **Data e Hora:** ${m.dataHora}\n- **Mestre:** <@${m.gmId}>\n- **Nível de Desafio:** ${textoNd}\n- **Dificuldade:** ${modificadores[m.dif].nome}\n\n${mencao}**Vagas:** ${m.jogadoresAceitos.length}/${m.vagasTotais}\n${listaVagas.join('\n')}`;
+    const content = `${mencao}${statusTag}- **Missão:** ${m.nome}\n- **Data e Hora:** ${m.dataHora}\n- **Mestre:** <@${m.gmId}>\n- **Nível de Desafio:** ${textoNd}\n- **Dificuldade:** ${modificadores[m.dif].nome}\n\n**Vagas:** ${m.jogadoresAceitos.length}/${m.vagasTotais}\n${listaVagas.join('\n')}`;
     
-    const embed = new EmbedBuilder().setColor(m.concluida ? '#2ECC71' : '#1C1C28').addFields(
+    const embed = new EmbedBuilder().setColor(corEmbed).addFields(
         { name: 'Estilo de Jogo e Enredo', value: m.enredo, inline: false },
         { name: 'Observações', value: m.obs, inline: false }
     );
 
-    if (m.concluida) {
-        const xpBase = tabelaRecompensas[m.nd].xp;
-        const dinBase = tabelaRecompensas[m.nd].dinheiro;
-        const mult = modificadores[m.dif].mult;
+    // Cálculos prévios
+    const xpBase = tabelaRecompensas[m.nd].xp;
+    const dinBase = tabelaRecompensas[m.nd].dinheiro;
+    const mult = modificadores[m.dif].mult;
+    const xpFinal = Math.floor(xpBase * mult);
+    const dinFinal = Math.floor(dinBase * mult);
 
-        const xpFinal = Math.floor(xpBase * mult);
-        const dinFinal = Math.floor(dinBase * mult);
-
-        const textoJogadores = `**XP:** ${xpFinal}\n**Dinheiro:** T$ ${dinFinal}`;
-        const textoMestre = `**XP:** ${Math.floor(xpFinal / 2)}\n**Dinheiro:** T$ ${Math.floor(dinFinal / 2)}`;
+    if (!m.concluida && !m.falha) {
+        // Exibe recompensa esperada no rodapé apenas enquanto ativa
+        embed.setFooter({ text: `Recompensa: ${xpFinal} XP | T$ ${dinFinal} (ND ${m.nd})` });
+        
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`join_${missionId}`).setLabel('Participar').setStyle(ButtonStyle.Primary)
+        );
+        return { content, embeds: [embed], components: [row] };
+    } else {
+        // Missão encerrada (Sucesso ou Falha)
+        const xpJogadores = m.falha ? Math.floor(xpFinal / 2) : xpFinal;
+        const dinJogadores = m.falha ? Math.floor(dinFinal / 2) : dinFinal;
+        
+        const xpMestre = Math.floor(xpFinal / 2);
+        const dinMestre = Math.floor(dinFinal / 2);
 
         embed.addFields(
-            { name: '🎁 Recompensas dos Jogadores', value: textoJogadores, inline: true },
-            { name: '👑 Recompensa do Mestre', value: textoMestre, inline: true }
+            { name: '🎁 Recompensas dos Jogadores', value: `**XP:** ${xpJogadores}\n**Dinheiro:** T$ ${dinJogadores}`, inline: true },
+            { name: '👑 Recompensa do Mestre', value: `**XP:** ${xpMestre}\n**Dinheiro:** T$ ${dinMestre}`, inline: true }
         );
         return { content, embeds: [embed], components: [] };
     }
-
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`join_${missionId}`).setLabel('Participar').setStyle(ButtonStyle.Primary)
-    );
-
-    return { content, embeds: [embed], components: [row] };
 }
 
 // --- FUNÇÃO AUXILIAR: DESENHAR PAINEL DO MESTRE NA DM ---
@@ -114,17 +131,19 @@ function buildGmPanel(missionId, m) {
     );
     const rowBtns = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`edit_${missionId}`).setLabel('📝 Editar Textos').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`complete_${missionId}`).setLabel('✅ Concluir Missão').setStyle(ButtonStyle.Success)
+        new ButtonBuilder().setCustomId(`complete_${missionId}`).setLabel('✅ Concluir').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`fail_${missionId}`).setLabel('❌ Falhar').setStyle(ButtonStyle.Danger)
     );
 
     return {
-        content: `📝 **Painel do Mestre**\nUse os menus abaixo para configurar os aspectos de sistema, ou edite os textos da missão. A missão no mural atualizará automaticamente!\nLink do Mural: https://discord.com/channels/${m.guildId}/${m.channelId}/${missionId}`,
+        content: `📝 **Painel do Mestre**\nUse os menus abaixo para configurar os aspectos de sistema, ou edite os textos da missão.\nLink do Mural: https://discord.com/channels/${m.guildId}/${m.channelId}/${missionId}`,
         embeds: buildMissionMessage(missionId, m).embeds,
         components: [rowNd, rowDif, rowBtns]
     };
 }
 
 const ndChoices = Array.from({ length: 20 }, (_, i) => ({ name: `ND ${i + 1}`, value: i + 1 }));
+const vagasChoices = Array.from({ length: 6 }, (_, i) => ({ name: `${i + 1} Vaga(s)`, value: i + 1 }));
 
 const commands = [
     new SlashCommandBuilder()
@@ -140,7 +159,7 @@ const commands = [
         .addIntegerOption(opt => opt.setName('nd').setDescription('Nível de Desafio Base').setRequired(true).addChoices(...ndChoices))
         .addStringOption(opt => opt.setName('dificuldade').setDescription('Dificuldade').setRequired(true)
             .addChoices({ name: 'Normal', value: 'normal' }, { name: 'Difícil', value: 'dificil' }, { name: 'Tormenta', value: 'tormenta' }))
-        .addStringOption(opt => opt.setName('data_hora').setDescription('Data e horário da sessão').setRequired(true))
+        .addIntegerOption(opt => opt.setName('vagas').setDescription('Quantidade de Vagas').setRequired(true).addChoices(...vagasChoices)),
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);
@@ -159,6 +178,7 @@ client.on('interactionCreate', async interaction => {
 
     // === COMANDOS DE BARRA ===
     if (interaction.isChatInputCommand()) {
+        
         if (interaction.commandName === 'recompensa') {
             const nd = interaction.options.getInteger('nd');
             const dif = interaction.options.getString('dificuldade');
@@ -174,17 +194,21 @@ client.on('interactionCreate', async interaction => {
         }
 
         if (interaction.commandName === 'criarmissao') {
+            if (gmActiveMissions.has(interaction.user.id)) {
+                return interaction.reply({ content: '❌ Você já possui uma missão ativa! Conclua ou marque como falha a atual no seu PV antes de criar outra.', ephemeral: true });
+            }
+
             const nd = interaction.options.getInteger('nd');
             const dif = interaction.options.getString('dificuldade');
-            const dataHora = interaction.options.getString('data_hora');
+            const vagas = interaction.options.getInteger('vagas');
             const sessionId = interaction.id;
             
-            sessionCache.set(sessionId, { nd, dif, dataHora });
+            sessionCache.set(sessionId, { nd, dif, vagas });
 
             const modal = new ModalBuilder().setCustomId(`modal_missao_${sessionId}`).setTitle('Criar Missão');
             modal.addComponents(
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nome').setLabel('Nome da Missão').setStyle(TextInputStyle.Short).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('vagas').setLabel('Vagas (1 a 6)').setPlaceholder('Ex: 4').setStyle(TextInputStyle.Short).setMaxLength(1).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('data_hora').setLabel('Data e Hora').setPlaceholder('Ex: Sábado às 20h, Amanhã 19:00...').setStyle(TextInputStyle.Short).setRequired(true)),
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('enredo').setLabel('Estilo de Jogo e Enredo').setStyle(TextInputStyle.Paragraph).setRequired(true)),
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('observacoes').setLabel('Observações').setStyle(TextInputStyle.Paragraph).setRequired(false))
             );
@@ -196,11 +220,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isModalSubmit()) {
         if (interaction.customId.startsWith('modal_missao_')) {
             const sessionId = interaction.customId.split('_')[2];
-            const sessionData = sessionCache.get(sessionId) || { nd: 1, dif: 'normal', dataHora: '?' };
-
-            let vagas = parseInt(interaction.fields.getTextInputValue('vagas'));
-            if (isNaN(vagas) || vagas < 1) vagas = 1;
-            if (vagas > 6) vagas = 6;
+            const sessionData = sessionCache.get(sessionId) || { nd: 1, dif: 'normal', vagas: 4 };
 
             const missionData = {
                 gmId: interaction.user.id,
@@ -208,14 +228,17 @@ client.on('interactionCreate', async interaction => {
                 channelId: interaction.channel.id,
                 nd: sessionData.nd,
                 dif: sessionData.dif,
-                dataHora: sessionData.dataHora,
+                dataHora: interaction.fields.getTextInputValue('data_hora'),
                 nome: interaction.fields.getTextInputValue('nome'),
-                vagasTotais: vagas,
+                vagasTotais: sessionData.vagas,
                 enredo: interaction.fields.getTextInputValue('enredo'),
                 obs: interaction.fields.getTextInputValue('observacoes') || 'Nenhuma.',
                 jogadoresAceitos: [],
-                concluida: false
+                concluida: false,
+                falha: false
             };
+            
+            gmActiveMissions.add(interaction.user.id);
 
             const missionMessage = await interaction.reply({ ...buildMissionMessage('temp', missionData), fetchReply: true });
             const missionId = missionMessage.id;
@@ -235,15 +258,10 @@ client.on('interactionCreate', async interaction => {
         if (interaction.customId.startsWith('editmodal_')) {
             const missionId = interaction.customId.split('_')[1];
             const m = activeMissions.get(missionId);
-            if (!m) return interaction.reply({ content: 'Missão expirada.', ephemeral: true });
-
-            let vagas = parseInt(interaction.fields.getTextInputValue('vagas'));
-            if (isNaN(vagas) || vagas < 1) vagas = 1;
-            if (vagas > 6) vagas = 6;
+            if (!m) return interaction.reply({ content: 'Missão expirada na memória.', ephemeral: true });
 
             m.nome = interaction.fields.getTextInputValue('nome');
             m.dataHora = interaction.fields.getTextInputValue('data_hora');
-            m.vagasTotais = vagas;
             m.enredo = interaction.fields.getTextInputValue('enredo');
             m.obs = interaction.fields.getTextInputValue('observacoes') || 'Nenhuma.';
 
@@ -281,40 +299,46 @@ client.on('interactionCreate', async interaction => {
 
     // === BOTÕES ===
     if (interaction.isButton()) {
-        
+    
         if (interaction.customId.startsWith('edit_')) {
             const missionId = interaction.customId.split('_')[1];
             const m = activeMissions.get(missionId);
-            if (!m) return interaction.reply({ content: 'Missão expirada.', ephemeral: true });
+            if (!m) return interaction.reply({ content: 'Missão expirada na memória.', ephemeral: true });
 
             const modal = new ModalBuilder().setCustomId(`editmodal_${missionId}`).setTitle('Editar Textos');
             modal.addComponents(
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nome').setLabel('Nome').setStyle(TextInputStyle.Short).setValue(m.nome).setRequired(true)),
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('data_hora').setLabel('Data e Hora').setStyle(TextInputStyle.Short).setValue(m.dataHora).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('vagas').setLabel('Vagas (1 a 6)').setStyle(TextInputStyle.Short).setValue(m.vagasTotais.toString()).setMaxLength(1).setRequired(true)),
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('enredo').setLabel('Enredo').setStyle(TextInputStyle.Paragraph).setValue(m.enredo).setRequired(true)),
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('observacoes').setLabel('Observações').setStyle(TextInputStyle.Paragraph).setValue(m.obs).setRequired(false))
             );
             await interaction.showModal(modal);
         }
 
-        if (interaction.customId.startsWith('complete_')) {
+        if (interaction.customId.startsWith('complete_') || interaction.customId.startsWith('fail_')) {
+            const isFail = interaction.customId.startsWith('fail_');
             const missionId = interaction.customId.split('_')[1];
             const m = activeMissions.get(missionId);
-            if (!m) return interaction.reply({ content: 'Missão expirada.', ephemeral: true });
+            if (!m) return interaction.reply({ content: 'Missão expirada na memória.', ephemeral: true });
 
-            m.concluida = true;
+            if (isFail) m.falha = true;
+            else m.concluida = true;
+
+            gmActiveMissions.delete(m.gmId); // Libera o mestre
+
+            const msgData = buildMissionMessage(missionId, m);
 
             try {
                 const guild = await client.guilds.fetch(m.guildId);
                 const channel = await guild.channels.fetch(m.channelId);
                 const msg = await channel.messages.fetch(missionId);
-                await msg.edit(buildMissionMessage(missionId, m));
+                await msg.edit(msgData);
             } catch (e) {}
 
+            // Atualiza o painel na DM replicando as recompensas exatamente igual ao mural
             await interaction.update({ 
-                content: `✅ **Missão Concluída!** O XP e Tibares foram calculados automaticamente no mural.\nLink do Mural: https://discord.com/channels/${m.guildId}/${m.channelId}/${missionId}`,
-                embeds: buildMissionMessage(missionId, m).embeds,
+                content: isFail ? `❌ **Missão marcada como falha!** O mural foi atualizado.\nLink: https://discord.com/channels/${m.guildId}/${m.channelId}/${missionId}` : `✅ **Missão Concluída!** O mural foi atualizado.\nLink: https://discord.com/channels/${m.guildId}/${m.channelId}/${missionId}`,
+                embeds: msgData.embeds,
                 components: [] 
             });
 
@@ -326,7 +350,7 @@ client.on('interactionCreate', async interaction => {
             const m = activeMissions.get(missionId);
             const playerId = interaction.user.id;
 
-            if (!m) return interaction.reply({ content: "Missão expirada.", ephemeral: true });
+            if (!m) return interaction.reply({ content: "Missão expirada na memória.", ephemeral: true });
             if (m.gmId === playerId) return interaction.reply({ content: "Você é o mestre!", ephemeral: true });
             if (m.jogadoresAceitos.includes(playerId)) return interaction.reply({ content: "Já está na missão!", ephemeral: true });
 
@@ -350,7 +374,7 @@ client.on('interactionCreate', async interaction => {
         if (interaction.customId.startsWith('acc_')) {
             const [, playerId, missionId] = interaction.customId.split('_');
             const m = activeMissions.get(missionId);
-            if (!m) return interaction.reply({ content: 'Erro: Missão expirada.', ephemeral: true });
+            if (!m) return interaction.reply({ content: 'Erro: Missão expirada na memória.', ephemeral: true });
 
             if (m.jogadoresAceitos.length < m.vagasTotais) {
                 if (!m.jogadoresAceitos.includes(playerId)) m.jogadoresAceitos.push(playerId);
@@ -386,7 +410,7 @@ client.on('interactionCreate', async interaction => {
         if (interaction.customId.startsWith('rem_')) {
             const [, playerId, missionId] = interaction.customId.split('_');
             const m = activeMissions.get(missionId);
-            if (!m) return interaction.reply({ content: 'Erro: Missão expirada.', ephemeral: true });
+            if (!m) return interaction.reply({ content: 'Erro: Missão expirada na memória.', ephemeral: true });
 
             m.jogadoresAceitos = m.jogadoresAceitos.filter(id => id !== playerId);
 
@@ -415,6 +439,3 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Servidor web de mentirinha rodando na porta ${port}`));
 
 client.login(token);
-
-
-
