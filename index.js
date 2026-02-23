@@ -21,7 +21,7 @@ const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID;
 
 // === COLOQUE O ID DO SEU CARGO FIXO AQUI ===
-const CARGO_JOGADORES_ID = '1475300658923045128';
+const CARGO_JOGADORES_ID = 'COLE_O_ID_AQUI';
 
 const client = new Client({ 
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages],
@@ -57,7 +57,11 @@ function buildMissionMessage(missionId, m) {
     const mencao = CARGO_JOGADORES_ID !== 'COLE_O_ID_AQUI' && !m.concluida ? `<@&${CARGO_JOGADORES_ID}>\n\n` : '';
     const statusTag = m.concluida ? `✅ **[MISSÃO CONCLUÍDA]**\n\n` : '';
     
-    const content = `${statusTag}- **Missão:** ${m.nome}\n- **Data e Hora:** ${m.dataHora}\n- **Mestre:** <@${m.gmId}>\n- **Nível de Desafio:** ND ${m.nd}\n- **Dificuldade:** ${modificadores[m.dif].nome}\n\n${mencao}**Vagas:** ${m.jogadoresAceitos.length}/${m.vagasTotais}\n${listaVagas.join('\n')}`;
+    // Calcula a margem de ND permitida (+1 e -1, limitando entre 1 e 20)
+    const ndMin = Math.max(1, m.nd - 1);
+    const ndMax = Math.min(20, m.nd + 1);
+    
+    const content = `${statusTag}- **Missão:** ${m.nome}\n- **Data e Hora:** ${m.dataHora}\n- **Mestre:** <@${m.gmId}>\n- **Nível de Desafio:** ND ${ndMin} - ND ${ndMax}\n- **Dificuldade:** ${modificadores[m.dif].nome}\n\n${mencao}**Vagas:** ${m.jogadoresAceitos.length}/${m.vagasTotais}\n${listaVagas.join('\n')}`;
     
     const embed = new EmbedBuilder().setColor(m.concluida ? '#2ECC71' : '#1C1C28').addFields(
         { name: 'Estilo de Jogo e Enredo', value: m.enredo, inline: false },
@@ -65,6 +69,7 @@ function buildMissionMessage(missionId, m) {
     );
 
     if (m.concluida) {
+        // O cálculo ainda usa a base exata (m.nd) para a recompensa correta
         const xpBase = tabelaRecompensas[m.nd].xp;
         const dinBase = tabelaRecompensas[m.nd].dinheiro;
         const mult = modificadores[m.dif].mult;
@@ -91,13 +96,11 @@ function buildMissionMessage(missionId, m) {
 
 // --- FUNÇÃO AUXILIAR: DESENHAR PAINEL DO MESTRE NA DM ---
 function buildGmPanel(missionId, m) {
-    // Select de ND
     const rowNd = new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder().setCustomId(`selnd_${missionId}`).setPlaceholder(`ND Atual: ${m.nd}`).addOptions(
-            Array.from({ length: 20 }, (_, i) => ({ label: `Nível de Desafio ${i + 1}`, value: `${i + 1}` }))
+        new StringSelectMenuBuilder().setCustomId(`selnd_${missionId}`).setPlaceholder(`ND Base Atual: ${m.nd}`).addOptions(
+            Array.from({ length: 20 }, (_, i) => ({ label: `Missão ND ${i + 1}`, value: `${i + 1}` }))
         )
     );
-    // Select de Dificuldade
     const rowDif = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder().setCustomId(`seldif_${missionId}`).setPlaceholder(`Dificuldade Atual: ${modificadores[m.dif].nome}`).addOptions([
             { label: 'Normal (100% Recompensa)', value: 'normal' },
@@ -105,7 +108,6 @@ function buildGmPanel(missionId, m) {
             { label: 'Tormenta (120% Recompensa)', value: 'tormenta' }
         ])
     );
-    // Botões
     const rowBtns = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`edit_${missionId}`).setLabel('📝 Editar Textos').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`complete_${missionId}`).setLabel('✅ Concluir Missão').setStyle(ButtonStyle.Success)
@@ -118,7 +120,6 @@ function buildGmPanel(missionId, m) {
     };
 }
 
-// Criando as escolhas de ND dinamicamente para o Slash Command (1 a 20)
 const ndChoices = Array.from({ length: 20 }, (_, i) => ({ name: `ND ${i + 1}`, value: i + 1 }));
 
 const commands = [
@@ -132,9 +133,9 @@ const commands = [
     new SlashCommandBuilder()
         .setName('criarmissao')
         .setDescription('Abre o formulário para criar uma missão no mural.')
-        .addIntegerOption(opt => opt.setName('nd').setDescription('Nível de Desafio').setRequired(true).addChoices(...ndChoices))
+        .addIntegerOption(opt => opt.setName('nd').setDescription('Nível de Desafio Base').setRequired(true).addChoices(...ndChoices))
         .addStringOption(opt => opt.setName('dificuldade').setDescription('Dificuldade').setRequired(true)
-            .addChoices({ name: 'Normal', value: 'normal' }, { name: 'Difícil', value: 'dificil' }, { name: 'Tormenta', value: 'tormenta' }))
+            .addChoices({ name: 'Normal', value: 'normal' }, { name: 'Difícil', value: 'dificil' }, { name: 'Tormenta 20%', value: 'tormenta' }))
         .addStringOption(opt => opt.setName('data_hora').setDescription('Data e horário da sessão').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -189,7 +190,6 @@ client.on('interactionCreate', async interaction => {
 
     // === MODAIS ===
     if (interaction.isModalSubmit()) {
-        // Criar Missão
         if (interaction.customId.startsWith('modal_missao_')) {
             const sessionId = interaction.customId.split('_')[2];
             const sessionData = sessionCache.get(sessionId) || { nd: 1, dif: 'normal', dataHora: '?' };
@@ -228,7 +228,6 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
-        // Editar Textos
         if (interaction.customId.startsWith('editmodal_')) {
             const missionId = interaction.customId.split('_')[1];
             const m = activeMissions.get(missionId);
@@ -255,18 +254,16 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // === MENUS SUSPENSOS (SELECT MENUS NA DM DO MESTRE) ===
+    // === MENUS SUSPENSOS ===
     if (interaction.isStringSelectMenu()) {
         if (interaction.customId.startsWith('selnd_') || interaction.customId.startsWith('seldif_')) {
             const missionId = interaction.customId.split('_')[1];
             const m = activeMissions.get(missionId);
             if (!m) return interaction.reply({ content: 'Missão expirada na memória.', ephemeral: true });
 
-            // Atualiza os valores na memória conforme a escolha
             if (interaction.customId.startsWith('selnd_')) m.nd = parseInt(interaction.values[0]);
             if (interaction.customId.startsWith('seldif_')) m.dif = interaction.values[0];
 
-            // Atualiza Mural
             try {
                 const guild = await client.guilds.fetch(m.guildId);
                 const channel = await guild.channels.fetch(m.channelId);
@@ -274,7 +271,6 @@ client.on('interactionCreate', async interaction => {
                 await msg.edit(buildMissionMessage(missionId, m));
             } catch (e) {}
 
-            // Atualiza Painel do Mestre
             await interaction.update(buildGmPanel(missionId, m));
         }
     }
@@ -282,7 +278,6 @@ client.on('interactionCreate', async interaction => {
     // === BOTÕES ===
     if (interaction.isButton()) {
         
-        // Editar Textos
         if (interaction.customId.startsWith('edit_')) {
             const missionId = interaction.customId.split('_')[1];
             const m = activeMissions.get(missionId);
@@ -299,7 +294,6 @@ client.on('interactionCreate', async interaction => {
             await interaction.showModal(modal);
         }
 
-        // Concluir Imediatamente
         if (interaction.customId.startsWith('complete_')) {
             const missionId = interaction.customId.split('_')[1];
             const m = activeMissions.get(missionId);
@@ -323,7 +317,6 @@ client.on('interactionCreate', async interaction => {
             activeMissions.delete(missionId);
         }
 
-        // Fluxo de Participação/Aprovação...
         if (interaction.customId.startsWith('join_')) {
             const missionId = interaction.customId.split('_')[1];
             const m = activeMissions.get(missionId);
@@ -410,13 +403,11 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-client.login(token);
-
 // --- SISTEMA PARA MANTER O BOT ONLINE NO RENDER ---
 const express = require('express');
 const app = express();
 app.get('/', (req, res) => res.send('O Bot do Mural de RPG está online e operante!'));
 const port = process.env.PORT || 3000;
-
 app.listen(port, () => console.log(`Servidor web de mentirinha rodando na porta ${port}`));
 
+client.login(token);
