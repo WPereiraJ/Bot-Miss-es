@@ -50,11 +50,12 @@ const missionSchema = new mongoose.Schema({
     obs: String,
     jogadoresAceitos: [String],
     concluida: { type: Boolean, default: false },
-    falha: { type: Boolean, default: false }
+    falha: { type: Boolean, default: false },
+    gmNd: Number // Variável nova para guardar o ND do Mestre no encerramento
 });
 const Mission = mongoose.model('Mission', missionSchema);
 
-// Cache só para os modais rápidos (isso não tem problema reiniciar)
+// Cache só para os modais rápidos
 const sessionCache = new Map();
 
 // --- SISTEMA DE RECOMPENSAS ---
@@ -115,10 +116,22 @@ function buildMissionMessage(missionId, m) {
         const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`join_${missionId}`).setLabel('Participar').setStyle(ButtonStyle.Primary));
         return { content, embeds: [embed], components: [row] };
     } else {
+        // Recompensa dos Jogadores (Normal)
         const xpJogadores = m.falha ? Math.floor(xpFinal / 2) : xpFinal;
         const dinJogadores = m.falha ? Math.floor(dinFinal / 2) : dinFinal;
-        const xpMestre = Math.floor(xpFinal / 2);
-        const dinMestre = Math.floor(dinFinal / 2);
+        
+        // Recompensa do Mestre (Novo sistema com ND personalizado + 20%)
+        const gmNd = m.gmNd || m.nd; // Caso não tenha gmNd, usa o m.nd de segurança
+        const gmXpBase = tabelaRecompensas[gmNd] ? tabelaRecompensas[gmNd].xp : 0;
+        const gmDinBase = tabelaRecompensas[gmNd] ? tabelaRecompensas[gmNd].dinheiro : 0;
+        
+        // Aplica o multiplicador de dificuldade da missão no ND do mestre
+        const gmXpFinal = Math.floor(gmXpBase * mult);
+        const gmDinFinal = Math.floor(gmDinBase * mult);
+        
+        // Mantém a regra base (metade do valor final) e adiciona os +20% (multiplicando por 1.20)
+        const xpMestre = Math.floor((gmXpFinal / 2) * 1.20);
+        const dinMestre = Math.floor((gmDinFinal / 2) * 1.20);
 
         embed.addFields(
             { name: '🎁 Recompensas dos Jogadores', value: `**XP:** ${xpJogadores}\n**Dinheiro:** T$ ${dinJogadores}`, inline: true },
@@ -156,6 +169,7 @@ const commands = [
         .addIntegerOption(opt => opt.setName('nd').setDescription('Nível de Desafio Base').setRequired(true).addChoices(...ndChoices))
         .addStringOption(opt => opt.setName('dificuldade').setDescription('Dificuldade').setRequired(true).addChoices({ name: 'Normal', value: 'normal' }, { name: 'Difícil', value: 'dificil' }, { name: 'Tormenta', value: 'tormenta' }))
         .addIntegerOption(opt => opt.setName('vagas').setDescription('Quantidade de Vagas').setRequired(true).addChoices(...vagasChoices)),
+    new SlashCommandBuilder().setName('painelcargo').setDescription('Cria o botão para os jogadores pegarem o cargo.')
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);
@@ -168,6 +182,12 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
 
     if (interaction.isChatInputCommand()) {
+        if (interaction.commandName === 'painelcargo') {
+            const emb = new EmbedBuilder().setColor('#2ECC71').setTitle('📜 Cargo de Aventureiro').setDescription('Clique abaixo para pegar o cargo e receber notificações do mural.');
+            const r = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('pegar_cargo').setLabel('Pegar Cargo').setStyle(ButtonStyle.Success));
+            return interaction.reply({ embeds: [emb], components: [r] });
+        }
+
         if (interaction.commandName === 'recompensa') {
             const nd = interaction.options.getInteger('nd');
             const dif = interaction.options.getString('dificuldade');
@@ -183,7 +203,6 @@ client.on('interactionCreate', async interaction => {
         }
 
         if (interaction.commandName === 'criarmissao') {
-            // Verifica no banco de dados se o mestre já tem missão ativa
             const hasActive = await Mission.findOne({ gmId: interaction.user.id });
             if (hasActive) {
                 return interaction.reply({ content: '❌ Você já possui uma missão ativa! Conclua ou marque como falha a atual no seu PV antes de criar outra.', ephemeral: true });
@@ -227,7 +246,6 @@ client.on('interactionCreate', async interaction => {
             const missionMessage = await interaction.reply({ ...buildMissionMessage('temp', missionData), fetchReply: true });
             const missionId = missionMessage.id;
             
-            // Salva no Banco de Dados
             const newMission = new Mission({ missionId, ...missionData });
             await newMission.save();
             
@@ -259,6 +277,41 @@ client.on('interactionCreate', async interaction => {
             } catch (e) {}
             await interaction.update(buildGmPanel(missionId, m));
         }
+
+        // NOVO: Coleta o ND do Mestre para encerrar a missão
+        if (interaction.customId.startsWith('endmodal_')) {
+            const [, statusStr, missionId] = interaction.customId.split('_');
+            const isFail = (statusStr === 'fail');
+            
+            const m = await Mission.findOne({ missionId });
+            if (!m) return interaction.reply({ content: 'Missão não encontrada.', ephemeral: true });
+
+            const gmNdInput = parseInt(interaction.fields.getTextInputValue('gm_nd'));
+            
+            // Valida se o Mestre digitou um número real entre 1 e 20
+            if (isNaN(gmNdInput) || gmNdInput < 1 || gmNdInput > 20) {
+                return interaction.reply({ content: '❌ Por favor, digite um número de ND válido entre 1 e 20.', ephemeral: true });
+            }
+
+            m.falha = isFail;
+            m.concluida = !isFail;
+            m.gmNd = gmNdInput;
+
+            const msgData = buildMissionMessage(missionId, m);
+            try {
+                const guild = await client.guilds.fetch(m.guildId);
+                const channel = await guild.channels.fetch(m.channelId);
+                const msg = await channel.messages.fetch(missionId);
+                await msg.edit(msgData);
+            } catch (e) {}
+
+            await interaction.update({ 
+                content: isFail ? `❌ **Missão marcada como falha!**\nLink: https://discord.com/channels/${m.guildId}/${m.channelId}/${missionId}` : `✅ **Missão Concluída!**\nLink: https://discord.com/channels/${m.guildId}/${m.channelId}/${missionId}`,
+                embeds: msgData.embeds, components: [] 
+            });
+
+            await Mission.deleteOne({ missionId });
+        }
     }
 
     if (interaction.isStringSelectMenu()) {
@@ -282,6 +335,13 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId === 'pegar_cargo') {
+            try { 
+                await interaction.member.roles.add(CARGO_JOGADORES_ID); 
+                await interaction.reply({ content: '✅ Você pegou o cargo de aventureiro!', ephemeral: true }); 
+            } catch (e) { await interaction.reply({ content: '❌ Erro de permissão.', ephemeral: true }); }
+        }
+
         if (interaction.customId.startsWith('edit_')) {
             const missionId = interaction.customId.split('_')[1];
             const m = await Mission.findOne({ missionId });
@@ -297,30 +357,30 @@ client.on('interactionCreate', async interaction => {
             await interaction.showModal(modal);
         }
 
+        // NOVO: Aciona o formulário para o Mestre colocar o ND do seu personagem
         if (interaction.customId.startsWith('complete_') || interaction.customId.startsWith('fail_')) {
             const isFail = interaction.customId.startsWith('fail_');
             const missionId = interaction.customId.split('_')[1];
+            
             const m = await Mission.findOne({ missionId });
             if (!m) return interaction.reply({ content: 'Missão não encontrada.', ephemeral: true });
 
-            if (isFail) m.falha = true;
-            else m.concluida = true;
-
-            const msgData = buildMissionMessage(missionId, m);
-            try {
-                const guild = await client.guilds.fetch(m.guildId);
-                const channel = await guild.channels.fetch(m.channelId);
-                const msg = await channel.messages.fetch(missionId);
-                await msg.edit(msgData);
-            } catch (e) {}
-
-            await interaction.update({ 
-                content: isFail ? `❌ **Missão marcada como falha!**\nLink: https://discord.com/channels/${m.guildId}/${m.channelId}/${missionId}` : `✅ **Missão Concluída!**\nLink: https://discord.com/channels/${m.guildId}/${m.channelId}/${missionId}`,
-                embeds: msgData.embeds, components: [] 
-            });
-
-            // Remove do banco de dados já que a missão encerrou e os textos finais já estão na mensagem visual
-            await Mission.deleteOne({ missionId });
+            const statusStr = isFail ? 'fail' : 'complete';
+            const modal = new ModalBuilder()
+                .setCustomId(`endmodal_${statusStr}_${missionId}`)
+                .setTitle('Recompensa do Mestre');
+                
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('gm_nd')
+                        .setLabel('Qual o ND do seu personagem? (1 a 20)')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                )
+            );
+            
+            await interaction.showModal(modal);
         }
 
         if (interaction.customId.startsWith('join_')) {
@@ -407,6 +467,5 @@ const express = require('express');
 const app = express();
 app.get('/', (req, res) => res.send('O Bot do Mural de RPG está online e salvo no MongoDB!'));
 app.listen(process.env.PORT || 3000);
-
 
 client.login(token);
